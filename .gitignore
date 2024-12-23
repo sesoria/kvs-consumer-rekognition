@@ -163,9 +163,9 @@ cython_debug/
 .DS_*
 
 # JPEGS from detection, mkv's and jsons
-git rm --cached mkv/
-git rm --cached videos/
-git rm --cached frames/
-git rm --cached detected/
-git rm --cached motion_frames/
-git rm --cached bounding_boxes/
+mkv/
+videos/
+frames/
+detected/
+motion_frames/
+bounding_boxes/

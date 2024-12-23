@@ -161,3 +161,11 @@ cython_debug/
 
 # Stupid Mac files
 .DS_*
+
+# JPEGS from detection, mkv's and jsons
+/mkv
+/video
+/frames
+/detected
+/motion_frames
+/bounding_boxes

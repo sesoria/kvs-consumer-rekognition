@@ -1,4 +1,5 @@
 import io
+import cv2
 import logging
 import numpy as np
 import imageio.v3 as iio
@@ -34,13 +35,12 @@ class MotionDetector():
         '''
 
         # Parse all frames in the fragment to frames list
-        print("hola")
         frames = iio.imread(io.BytesIO(fragment_bytes), plugin="pyav", index=...)
+        print(f"HAY {len(frames)}FRAMES")
         # Store and return frames in frame ratio of total available 
         ret_frames = []
         for i in range(0, len(frames), one_in_frames_ratio):
             ret_frames.append(frames[i])
-        print("adios")
 
         return ret_frames
 
@@ -69,10 +69,47 @@ class MotionDetector():
         
         return jpeg_paths
 
-    def pixel_difference(self, frames, threshold=50):
-        significant_frames = [frames[0]]  # Almacena el primer frame como base
-        for i in range(1, len(frames)):
-            diff = np.abs(frames[i].astype(np.int16) - frames[i-1].astype(np.int16))  # Diferencia de píxeles
-            if np.mean(diff) > threshold:  # Compara con el umbral
-                significant_frames.append(frames[i])
-        return significant_frames
+    def frame_differencing(self, frames, threshold=90, min_motion_pixels=3500):
+        """
+        Analiza una lista de frames para detectar movimiento.
+
+        ### Parámetros:
+        - frames: List[numpy.ndarray]
+            Lista de frames en formato numpy.ndarray (preprocesados).
+        - threshold: int, opcional
+            Umbral para la diferencia de píxeles entre frames. Default es 30.
+        - min_motion_pixels: int, opcional
+            Número mínimo de píxeles cambiados para considerar que hay movimiento. Default es 500.
+
+        ### Retorno:
+        - motion_frames: List[int]
+            Lista de índices de los frames donde se detectó movimiento.
+        """
+        prev_frame = None
+        motion_frames = []
+
+        for idx, frame in enumerate(frames):
+            # Convertir el frame a escala de grises
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            if prev_frame is not None:
+                # Calcular diferencia entre el frame actual y el anterior
+                diff = cv2.absdiff(prev_frame, frame_gray)
+                
+                # Umbralización
+                _, diff_thresh = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+
+                # # Dilatar para ampliar las áreas detectadas
+                # diff_thresh = cv2.dilate(diff_thresh, None, iterations=2)
+
+                # Contar píxeles de movimiento
+                non_zero_count = cv2.countNonZero(diff_thresh)
+                print(f"Frame {idx} con pixeles valiosos {non_zero_count}")
+                # Detectar si hay movimiento
+                if non_zero_count > min_motion_pixels:
+                    motion_frames.append(frame)
+
+            # Actualizar el frame anterior
+            prev_frame = frame_gray
+
+        return motion_frames

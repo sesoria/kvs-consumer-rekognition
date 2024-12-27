@@ -168,6 +168,30 @@ class KvsPythonConsumerExample:
             log.error(f'on_fragment_arrived Error: {err}')
 
     def process_fragment_frames(self, fragment_bytes, frames_path, labels_path, detections_path):
+        '''
+        Processes the fragment frames for motion detection and object recognition.
+
+        This function extracts frames from the fragment, detects motion, and identifies objects using AWS Rekognition.
+
+        ### Parameters:
+
+            **fragment_bytes**: bytearray
+                Raw bytes of the fragment to process.
+
+            **frames_path**: str
+                Path to save the extracted frames as images.
+
+            **labels_path**: str
+                Path to save the labels detected by AWS Rekognition.
+
+            **detections_path**: str
+                Path to save the frames with bounding boxes of detected objects.
+
+        ### Returns:
+
+            **motion_frames**: list
+                List of frames where motion was detected.
+        '''
         try:
             start_time = time.time()
             # Obtains the frames of the fragment in a numpy array type
@@ -190,30 +214,58 @@ class KvsPythonConsumerExample:
 
         except Exception as e:
             print(f"Error en el procesamiento del fragmento: {e}")
-    
+            
     def get_labels_from_frames(self, frames, save_path):
+        '''
+        Extracts labels from frames using AWS Rekognition, saves the Rekognition response for each frame as a JSON file,
+        and collects all the detected labels for further processing.
+
+        ### Parameters:
+            **frames**: list of ndarray
+                List of frames represented as numpy arrays.
+
+            **save_path**: str
+                The base path where JSON files containing the Rekognition response for each frame will be saved.
+
+        ### Returns:
+            **labels**: list
+                A list of labels detected by Rekognition for each frame.
+        '''
         labels = []
+        # Convert frames to JPEG format using the processor utility.
         frames_jpeg = self.kvs_fragment_processor.get_ndarray_frames_to_jpeg(frames)
         for idx, jpeg in enumerate(frames_jpeg):
+            # Call AWS Rekognition to detect labels in the JPEG image.
             response = self.rekognition_client.detect_labels(
-                        Image={'Bytes': jpeg},
-                        MaxLabels=10,
-                        MinConfidence=80
+                Image={'Bytes': jpeg},
+                MaxLabels=10,
+                MinConfidence=80
             )
+            # Save the Rekognition response as a JSON file for debugging or future reference.
             with open(f"{save_path}_{idx}.json", "w") as f:
                 f.write(json.dumps(response))
+            # Append detected labels to the result list.
             labels.append(response["Labels"])
         return labels
-                
+
     def get_bounding_boxes(self, labels_fragment):
-        """
-        Parse the Rekognition response. We want the youngest labels in terms of relative labels. 
-        Ex: We can have a Person but also it could be an Adult or a Male and more specifically it would be a Man
-        So we keep the labels that has instances and dont have childs with instances
-        """
+        '''
+        Parses the Rekognition response to extract bounding boxes and corresponding metadata 
+        for labels with instances. Filters out parent labels to retain the most specific labels.
+
+        ### Parameters:
+            **labels_fragment**: list of dict
+                A list containing Rekognition responses (labels and instances) for multiple frames.
+
+        ### Returns:
+            **fragment_bounding_boxes**: list of list of dict
+                A list of bounding boxes for each frame. Each bounding box contains the label name, 
+                bounding box coordinates, and confidence score.
+        '''
         fragment_bounding_boxes = []
         valid_fragment_labels = []
-        # Getting all the lables with instances that dont have childs with instances
+        
+        # Filter out parent labels that have children with instances.
         for labels_frame in labels_fragment:
             parents = set()
             child_labels = []
@@ -221,17 +273,20 @@ class KvsPythonConsumerExample:
                 if len(label["Instances"]) > 0:
                     if label["Name"] not in parents:
                         child_labels.append(label)
+                        # Add parent names to the set to identify child-parent relationships.
                         for parent in label["Parents"]:
                             parents.add(parent["Name"])
+            # Retain only the child labels without parents in the final list.
             valid_fragment_labels.append([label for label in child_labels if label["Name"] not in parents])
-        # Prettying the labels to get only the keys related to the BBoxes
+        
+        # Extract bounding box information for valid labels.
         for labels_frame in valid_fragment_labels:
             frame_bounding_boxes = []
             for label in labels_frame:
                 for instance in label["Instances"]:
                     frame_bounding_boxes.append(
                         {
-                            "Name" : label["Name"],
+                            "Name": label["Name"],
                             "Bounding_box": instance["BoundingBox"],
                             "Confidence": instance["Confidence"],
                         }
@@ -240,28 +295,16 @@ class KvsPythonConsumerExample:
 
         print(fragment_bounding_boxes)
         return fragment_bounding_boxes
-                            
-    
+
     def on_stream_read_complete(self, stream_name):
         '''
-        This callback is triggered by the KvsConsumerLibrary when a stream has no more fragments available.
-        This represents a graceful exit of the KvsConsumerLibrary thread.
+        Callback triggered when the KvsConsumerLibrary finishes reading all available fragments 
+        from the specified stream. Can be used to clean up resources or restart the stream.
 
-        A stream will reach the end of the available fragments if the StreamSelector applied some 
-        time or fragment bounding on the media request or if requesting a live steam and the producer 
-        stopped sending more fragments. 
-
-        Here you can choose to either restart reading the stream at a new time or just clean up any
-        resources that were expecting to process any further fragments. 
-        
         ### Parameters:
-
             **stream_name**: str
-                Name of the stream as set when the KvsConsumerLibrary thread triggering this callback was initiated.
-                Use this to identify a fragment when multiple streams are read from different instances of KvsConsumerLibrary to this callback.
+                Name of the stream being read, useful when processing multiple streams.
         '''
-
-        # Do something here to tell the application that reading from the stream ended gracefully.
         print(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
         log.info(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
 
@@ -296,7 +339,19 @@ class KvsPythonConsumerExample:
 
     def _get_data_endpoint(self, stream_name, api_name):
         '''
-        Convenience method to get the KVS client endpoint for specific API calls. 
+        Retrieves the endpoint for a specific API call using the KVS client. 
+        This endpoint is required for subsequent interactions with the KVS API.
+
+        ### Parameters:
+            **stream_name**: str
+                Name of the Kinesis Video Stream.
+
+            **api_name**: str
+                Name of the API for which the endpoint is requested (e.g., "GET_MEDIA").
+
+        ### Returns:
+            **data_endpoint**: str
+                The endpoint URL for the requested API.
         '''
         response = self.kvs_client.get_data_endpoint(
             StreamName=stream_name,

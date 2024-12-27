@@ -229,46 +229,71 @@ class KvsFragementProcessor():
         """
         Draws bounding boxes and labels on a list of frames.
 
-        Args:
+        ### Parameters:
             ndarray_frames: List of NumPy arrays representing frames.
-            fragment_bounding_boxes: List of dictionary lists, where each list contains the dictionarys with info about the BBoxes of each frame:
+            fragment_bounding_boxes: List of lists of dictionaries. Each list contains dictionaries with bounding box information for each frame:
                 frame_bboxes: List of dictionaries, where each dictionary contains:
-                    - "name": Class label of the object.
-                    - "bounding_box": Dictionary with keys "Width", "Height", "Left", "Top" 
+                    - "name": Class label of the detected object.
+                    - "bounding_box": Dictionary with keys "Width", "Height", "Left", "Top"
                     representing normalized coordinates (0-1).
 
-        Returns:
+        ### Return
             List of NumPy arrays representing frames with bounding boxes and labels drawn.
         """
-
-        new_frames = []
+        new_frames = []  # List to store frames with drawn bounding boxes and labels
         for frame, frame_bboxes in zip(ndarray_frames, fragment_bounding_boxes):
-            # Crear una copia del frame
-            frame_copy = frame.copy() 
+            # Create a copy of the frame to avoid modifying the original
+            frame_copy = frame.copy()
 
             for bbox in frame_bboxes:
-                height, width, _ = frame_copy.shape 
+                # Get the dimensions of the frame
+                height, width, _ = frame_copy.shape
+
+                # Calculate the bounding box coordinates in pixels
                 x1 = int(bbox['Bounding_box']['Left'] * width)
                 y1 = int(bbox['Bounding_box']['Top'] * height)
                 x2 = int((bbox['Bounding_box']['Left'] + bbox['Bounding_box']['Width']) * width)
                 y2 = int((bbox['Bounding_box']['Top'] + bbox['Bounding_box']['Height']) * height)
 
+                # Draw the bounding box rectangle on the frame
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+                # Add the class label text above the bounding box
                 cv2.putText(frame_copy, bbox['Name'], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-            new_frames.append(frame_copy) 
+            # Append the modified frame to the list
+            new_frames.append(frame_copy)
         return new_frames
 
-    
+
     def get_ndarray_frames_to_jpeg(self, frames):
-        frames_jpeg = []
+        """
+        Converts a list of NumPy arrays (frames) into JPEG images.
+
+        ### Parameters:
+            frames: List of NumPy arrays representing frames.
+
+        ### Return
+            frames_jpeg: List of bytes representing the generated JPEG images.
+        """
+        frames_jpeg = []  # List to store JPEG image bytes
         for frame in frames:
-            image = Image.fromarray(frame)    # Crear una imagen de Pillow desde el frame
-            buffer = io.BytesIO()             # Crear un buffer en memoria
-            image.save(buffer, format="JPEG") # Guardar la imagen en formato JPEG
-            buffer.seek(0)                    # Reiniciar el puntero del buffer
-            frames_jpeg.append(buffer.read()) # Devolver los bytes de la imagen)
+            # Create a Pillow image from the NumPy array
+            image = Image.fromarray(frame)
+
+            # Create an in-memory buffer to store the image
+            buffer = io.BytesIO()
+
+            # Save the image to the buffer in JPEG format
+            image.save(buffer, format="JPEG")
+
+            # Reset the buffer pointer to the beginning
+            buffer.seek(0)
+
+            # Read the JPEG image bytes and append them to the list
+            frames_jpeg.append(buffer.read())
         return frames_jpeg
+
 
     def get_raw_audio_track_from_simple_block(self, mkv_element):
         '''

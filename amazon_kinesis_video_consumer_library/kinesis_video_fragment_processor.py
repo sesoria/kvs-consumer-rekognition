@@ -15,10 +15,12 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 __author__ = "Dean Colcott <https://www.linkedin.com/in/deancolcott/>"
 
 import io
+import cv2
+import wave
 import logging
+from PIL import Image
 import imageio.v3 as iio
 import amazon_kinesis_video_consumer_library.ebmlite.util as emblite_utils
-import wave
 import amazon_kinesis_video_consumer_library.ebmlite.decoding as ebmlite_decoding
 
 # Init the logger.
@@ -159,7 +161,7 @@ class KvsFragementProcessor():
 
         return ret_frames
 
-    def save_frames_as_jpeg(self, fragment_bytes, one_in_frames_ratio, jpg_file_base_path):
+    def save_fragment_frames_as_jpeg(self, fragment_bytes, one_in_frames_ratio, jpg_file_base_path):
         '''
         Parses fragment_bytes and saves a ratio of available frames in the MKV fragment as
         JPEGs on the local disk.
@@ -178,6 +180,7 @@ class KvsFragementProcessor():
             Ratio of the available frames in the fragment to process and save.
 
         ### Return
+        
         jpeg_paths : List<Str>
             A list of file paths to the saved JPEN files. 
         
@@ -195,7 +198,77 @@ class KvsFragementProcessor():
             jpeg_paths.append(image_file_path)
         
         return jpeg_paths
+  
+    def save_frames_as_jpeg(self, ndarray_frames, jpg_file_base_path):
+        '''
+        Saves frames as JPEGs on the local disk.
+        
+        ### Parameters:
+        
+        ndarray_frames: List<numpy.ndarray>
+            A ByteArray with raw bytes from exactly one fragment.
+
+        ### Return
+        
+        jpeg_paths : List<Str>
+            A list of file paths to the saved JPEN files. 
+        
+        '''
+
+        # Write frames to disk as JPEG images
+        jpeg_paths = []
+        for i in range(len(ndarray_frames)):
+            frame = ndarray_frames[i]
+            image_file_path = '{}-{}.jpg'.format(jpg_file_base_path, i)
+            iio.imwrite(image_file_path, frame, format=None)
+            jpeg_paths.append(image_file_path)
+        
+        return jpeg_paths
+  
+    def get_frames_with_bounding_boxes(self, ndarray_frames, fragment_bounding_boxes):
+        """
+        Draws bounding boxes and labels on a list of frames.
+
+        Args:
+            ndarray_frames: List of NumPy arrays representing frames.
+            fragment_bounding_boxes: List of dictionary lists, where each list contains the dictionarys with info about the BBoxes of each frame:
+                frame_bboxes: List of dictionaries, where each dictionary contains:
+                    - "name": Class label of the object.
+                    - "bounding_box": Dictionary with keys "Width", "Height", "Left", "Top" 
+                    representing normalized coordinates (0-1).
+
+        Returns:
+            List of NumPy arrays representing frames with bounding boxes and labels drawn.
+        """
+
+        new_frames = []
+        for frame, frame_bboxes in zip(ndarray_frames, fragment_bounding_boxes):
+            # Crear una copia del frame
+            frame_copy = frame.copy() 
+
+            for bbox in frame_bboxes:
+                height, width, _ = frame_copy.shape 
+                x1 = int(bbox['Bounding_box']['Left'] * width)
+                y1 = int(bbox['Bounding_box']['Top'] * height)
+                x2 = int((bbox['Bounding_box']['Left'] + bbox['Bounding_box']['Width']) * width)
+                y2 = int((bbox['Bounding_box']['Top'] + bbox['Bounding_box']['Height']) * height)
+
+                cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame_copy, bbox['Name'], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+            new_frames.append(frame_copy) 
+        return new_frames
+
     
+    def get_ndarray_frames_to_jpeg(self, frames):
+        frames_jpeg = []
+        for frame in frames:
+            image = Image.fromarray(frame)    # Crear una imagen de Pillow desde el frame
+            buffer = io.BytesIO()             # Crear un buffer en memoria
+            image.save(buffer, format="JPEG") # Guardar la imagen en formato JPEG
+            buffer.seek(0)                    # Reiniciar el puntero del buffer
+            frames_jpeg.append(buffer.read()) # Devolver los bytes de la imagen)
+        return frames_jpeg
 
     def get_raw_audio_track_from_simple_block(self, mkv_element):
         '''
@@ -248,7 +321,6 @@ class KvsFragementProcessor():
 
             return track_nr                    
         return None
-
 
     def get_track_bytearray(self, mkv_dom, track_nr):
         '''

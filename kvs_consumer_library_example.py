@@ -7,6 +7,7 @@ import logging
 from amazon_kinesis_video_consumer_library.kinesis_video_streams_parser import KvsConsumerLibrary
 from amazon_kinesis_video_consumer_library.kinesis_video_fragment_processor import KvsFragementProcessor
 from amazon_kinesis_video_consumer_library.motion_detector import MotionDetector
+from web_socket.web_socket import WebSocketServer
 
 # Config the logger.
 log = logging.getLogger(__name__)
@@ -31,6 +32,10 @@ class KvsPythonConsumerExample:
         The KvsConsumerLibrary sits above these and parses responses from GetMedia and GetMediaForFragmentList 
         into MKV fragments and provides convenience functions to further process, save and extract individual frames.  
         '''
+
+        # Se inicializa el servidor WebSocket
+        self.websocket_server = WebSocketServer(host='0.0.0.0', port=8765)
+        self.websocket_server.start()
 
         # Create shared instance of KvsFragementProcessor
         self.kvs_fragment_processor = KvsFragementProcessor()
@@ -154,12 +159,14 @@ class KvsPythonConsumerExample:
                 os.makedirs(save_dir_detections)
 
             # Using the fragment number as a key/name for the frames
-            jpg_file_base_name = self.last_good_fragment_tags['AWS_KINESISVIDEO_FRAGMENT_NUMBER']
-            jpg_file_base_path = os.path.join(save_dir_frames, jpg_file_base_name)
-            labels_file_base_path = os.path.join(save_dir_labels, jpg_file_base_name)
-            detections_file_base_path = os.path.join(save_dir_detections, jpg_file_base_name)
+            fragment_number = self.last_good_fragment_tags['AWS_KINESISVIDEO_FRAGMENT_NUMBER']
+            jpg_file_base_path = os.path.join(save_dir_frames, fragment_number)
+            labels_file_base_path = os.path.join(save_dir_labels, fragment_number)
+            detections_file_base_path = os.path.join(save_dir_detections, fragment_number)
             
-            motion_frames = self.process_fragment_frames(fragment_bytes, jpg_file_base_path, labels_file_base_path, detections_file_base_path)
+            producer_timestamp = self.last_good_fragment_tags['AWS_KINESISVIDEO_PRODUCER_TIMESTAMP']
+            
+            motion_frames = self.process_fragment_frames(fragment_bytes, jpg_file_base_path, labels_file_base_path, detections_file_base_path, producer_timestamp, fragment_number)
             print(f"Resultado del procesamiento: {'Movimiento Detectado' if len(motion_frames) > 0 else '[]'}")
             processing_duration = time.time() - start_time
             print(f"Callback completado en {processing_duration:.4f} segundos.")
@@ -167,7 +174,7 @@ class KvsPythonConsumerExample:
         except Exception as err:
             log.error(f'on_fragment_arrived Error: {err}')
 
-    def process_fragment_frames(self, fragment_bytes, frames_path, labels_path, detections_path):
+    def process_fragment_frames(self, fragment_bytes, frames_path, labels_path, detections_path, producer_timestamp, fragment_number):
         '''
         Processes the fragment frames for motion detection and object recognition.
 
@@ -203,6 +210,16 @@ class KvsPythonConsumerExample:
                 labels_fragment = self.get_labels_from_frames(motion_frames, labels_path)
                 # Parse the Rekognition Response
                 fragment_bounding_boxes = self.get_bounding_boxes(labels_fragment)
+                
+                
+                # Enviar bounding boxes al frontend
+                message = json.dumps({
+                    "fragment_number": fragment_number,
+                    "timestamp": producer_timestamp,
+                    "labels": fragment_bounding_boxes
+                })
+                self.websocket_server.send_message_sync(message)
+                
                 # Gets the frames with a mask of the bounding boxes added
                 detection_frames = self.kvs_fragment_processor.get_frames_with_bounding_boxes(motion_frames, fragment_bounding_boxes)
                 self.kvs_fragment_processor.save_frames_as_jpeg(motion_frames, frames_path)
@@ -238,8 +255,8 @@ class KvsPythonConsumerExample:
             # Call AWS Rekognition to detect labels in the JPEG image.
             response = self.rekognition_client.detect_labels(
                 Image={'Bytes': jpeg},
-                MaxLabels=10,
-                MinConfidence=80
+                MaxLabels=15,
+                MinConfidence=87
             )
             # Save the Rekognition response as a JSON file for debugging or future reference.
             with open(f"{save_path}_{idx}.json", "w") as f:
@@ -307,6 +324,7 @@ class KvsPythonConsumerExample:
         '''
         print(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
         log.info(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
+        self.websocket_server.stop_server()
 
     def on_stream_read_exception(self, stream_name, error):
         '''
@@ -336,6 +354,7 @@ class KvsPythonConsumerExample:
 
         # Here we just log the error 
         print(f'####### ERROR: Exception on read stream: {stream_name}\n####### Fragment Tags:\n{self.last_good_fragment_tags}\nError Message:{error}')
+        # self.websocket_server.stop_server()
 
     def _get_data_endpoint(self, stream_name, api_name):
         '''

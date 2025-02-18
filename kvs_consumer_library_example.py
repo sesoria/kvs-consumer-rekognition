@@ -4,10 +4,10 @@ import json
 import time
 import boto3
 import logging
+from amazon_websocket_apigateway import websocket_apigateway as websocket_ag
+from amazon_kinesis_video_consumer_library.motion_detector import MotionDetector
 from amazon_kinesis_video_consumer_library.kinesis_video_streams_parser import KvsConsumerLibrary
 from amazon_kinesis_video_consumer_library.kinesis_video_fragment_processor import KvsFragementProcessor
-from amazon_kinesis_video_consumer_library.motion_detector import MotionDetector
-from web_socket.web_socket import WebSocketServer
 
 # Config the logger.
 log = logging.getLogger(__name__)
@@ -34,8 +34,7 @@ class KvsPythonConsumerExample:
         '''
 
         # Se inicializa el servidor WebSocket
-        self.websocket_server = WebSocketServer(host='0.0.0.0', port=8765)
-        self.websocket_server.start()
+        self.apigw_client = websocket_ag.client_ag_manegement_api()
 
         # Create shared instance of KvsFragementProcessor
         self.kvs_fragment_processor = KvsFragementProcessor()
@@ -209,17 +208,17 @@ class KvsPythonConsumerExample:
                 # Gets the AWS Rekognition response with the labels
                 labels_fragment = self.get_labels_from_frames(motion_frames, labels_path)
                 # Parse the Rekognition Response
+                # fragment_bounding_boxes, fragment_unique_bboxs = self.get_bounding_boxes(labels_fragment)
                 fragment_bounding_boxes = self.get_bounding_boxes(labels_fragment)
                 
-                
-                # Enviar bounding boxes al frontend
-                message = json.dumps({
+                # Enviar bounding boxes al frontend mediante AWS
+                active_connections = websocket_ag.get_connection_ids_by_stream(KVS_STREAM01_NAME)
+                websocket_ag.send_message_to_clients(self.apigw_client, active_connections, {
                     "fragment_number": fragment_number,
                     "timestamp": producer_timestamp,
                     "labels": fragment_bounding_boxes
                 })
-                self.websocket_server.send_message_sync(message)
-                
+
                 # Gets the frames with a mask of the bounding boxes added
                 detection_frames = self.kvs_fragment_processor.get_frames_with_bounding_boxes(motion_frames, fragment_bounding_boxes)
                 self.kvs_fragment_processor.save_frames_as_jpeg(motion_frames, frames_path)
@@ -255,20 +254,21 @@ class KvsPythonConsumerExample:
             # Call AWS Rekognition to detect labels in the JPEG image.
             response = self.rekognition_client.detect_labels(
                 Image={'Bytes': jpeg},
-                MaxLabels=15,
-                MinConfidence=87
+                MaxLabels=10,
+                MinConfidence=80
             )
             # Save the Rekognition response as a JSON file for debugging or future reference.
             with open(f"{save_path}_{idx}.json", "w") as f:
                 f.write(json.dumps(response))
             # Append detected labels to the result list.
-            labels.append(response["Labels"])
+            labels += response["Labels"]
         return labels
 
     def get_bounding_boxes(self, labels_fragment):
         '''
         Parses the Rekognition response to extract bounding boxes and corresponding metadata 
         for labels with instances. Filters out parent labels to retain the most specific labels.
+        The idea is to keep all labels from each frame in the fragment together.
 
         ### Parameters:
             **labels_fragment**: list of dict
@@ -283,35 +283,99 @@ class KvsPythonConsumerExample:
         valid_fragment_labels = []
         
         # Filter out parent labels that have children with instances.
-        for labels_frame in labels_fragment:
-            parents = set()
-            child_labels = []
-            for label in labels_frame:
-                if len(label["Instances"]) > 0:
-                    if label["Name"] not in parents:
-                        child_labels.append(label)
-                        # Add parent names to the set to identify child-parent relationships.
-                        for parent in label["Parents"]:
-                            parents.add(parent["Name"])
-            # Retain only the child labels without parents in the final list.
-            valid_fragment_labels.append([label for label in child_labels if label["Name"] not in parents])
+        parents = set()
+        child_labels = []
+        for label in labels_fragment:
+            if len(label["Instances"]) > 0:
+                if label["Name"] not in parents:
+                    child_labels.append(label)
+                    # Add parent names to the set to identify child-parent relationships.
+                    for parent in label["Parents"]:
+                        parents.add(parent["Name"])
+        # Retain only the child labels without parents in the final list.
+        valid_fragment_labels += [label for label in child_labels if label["Name"] not in parents]
         
         # Extract bounding box information for valid labels.
-        for labels_frame in valid_fragment_labels:
-            frame_bounding_boxes = []
-            for label in labels_frame:
-                for instance in label["Instances"]:
-                    frame_bounding_boxes.append(
-                        {
-                            "Name": label["Name"],
-                            "Bounding_box": instance["BoundingBox"],
-                            "Confidence": instance["Confidence"],
-                        }
-                    )
-            fragment_bounding_boxes.append(frame_bounding_boxes)
+        frame_bounding_boxes = []
+        for label in valid_fragment_labels:
+            for instance in label["Instances"]:
+                frame_bounding_boxes.append(
+                    {
+                        "Name": label["Name"],
+                        "Bounding_box": instance["BoundingBox"],
+                        "Confidence": instance["Confidence"],
+                    }
+                )
+        fragment_bounding_boxes.append(frame_bounding_boxes)
 
-        print(fragment_bounding_boxes)
+        # filter_duration = time.time()
+        # fragment_unique_bboxs = self.filter_detections(fragment_bounding_boxes[0])
+        # print(f"filter FUNCION en {time.time() - filter_duration:.4f} segundos.")
+        
+        # print(f"fragment_unique_bboxs:{fragment_unique_bboxs}\n\n")
+        print(f"fragment_bounding_boxes:{fragment_bounding_boxes}\n\n")
+        # return fragment_bounding_boxes, fragment_unique_bboxs
         return fragment_bounding_boxes
+
+    # def calculate_iou(self, box1, box2):
+    #     """
+    #     Calcula el IoU (Intersection over Union) entre dos bounding boxes.
+    #     Devuelve un valor entre 0 y 1 indicando el grado de solapamiento.
+    #     """
+    #     x1 = max(box1['Left'], box2['Left'])
+    #     y1 = max(box1['Top'], box2['Top'])
+    #     x2 = min(box1['Left'] + box1['Width'], box2['Left'] + box2['Width'])
+    #     y2 = min(box1['Top'] + box1['Height'], box2['Top'] + box2['Height'])
+
+    #     # Calcular ancho y alto de la intersección
+    #     width = max(0, x2 - x1)
+    #     height = max(0, y2 - y1)
+
+    #     # Área de intersección
+    #     intersection = width * height
+
+    #     # Área de cada bounding box
+    #     area1 = box1['Width'] * box1['Height']
+    #     area2 = box2['Width'] * box2['Height']
+
+    #     # Área de unión
+    #     union = area1 + area2 - intersection
+
+    #     # Evitar división por cero
+    #     return intersection / union if union > 0 else 0
+
+    # def filter_detections(self, detections, iou_threshold=0.5):
+    #     """
+    #     Filtra las detecciones para eliminar duplicados basándose en la superposición de Bounding Boxes.
+    #     Se queda con la última detección en la lista si hay solapamiento alto.
+    #     """
+    #     grouped = {}  # Agrupar por 'Name'
+
+    #     for obj in detections:
+    #         name = obj['Name']
+    #         if name not in grouped:
+    #             grouped[name] = []
+            
+    #         # Comprobamos si este objeto solapa con alguno de los ya almacenados
+    #         new_list = []
+    #         should_add = True  # Indica si debemos añadir este objeto
+            
+    #         for existing in grouped[name]:
+    #             iou = self.calculate_iou(obj['Bounding_box'], existing['Bounding_box'])
+                
+    #             if iou > iou_threshold:  # Si el solapamiento es alto
+    #                 should_add = True  # Queremos quedarnos con la última detección
+    #             else:
+    #                 new_list.append(existing)  # Mantenemos los anteriores si el IoU es bajo
+            
+    #         if should_add:
+    #             new_list.append(obj)  # Añadimos el nuevo objeto
+            
+    #         grouped[name] = new_list  # Actualizamos la lista para este 'Name'
+
+    #     # Convertimos el diccionario en lista
+    #     result = [obj for obj_list in grouped.values() for obj in obj_list]
+    #     return result
 
     def on_stream_read_complete(self, stream_name):
         '''
@@ -324,7 +388,7 @@ class KvsPythonConsumerExample:
         '''
         print(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
         log.info(f'Read Media on stream: {stream_name} Completed successfully - Last Fragment Tags: {self.last_good_fragment_tags}')
-        self.websocket_server.stop_server()
+        # self.websocket_server.stop_server()
 
     def on_stream_read_exception(self, stream_name, error):
         '''

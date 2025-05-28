@@ -36,7 +36,7 @@ class MotionDetector():
 
         # Parse all frames in the fragment to frames list
         frames = iio.imread(io.BytesIO(fragment_bytes), plugin="pyav", index=...)
-        print(f"HAY {len(frames)}FRAMES")
+        log.info(f"HAY {len(frames)}FRAMES")
         # Store and return frames in frame ratio of total available 
         ret_frames = []
         for i in range(0, len(frames), one_in_frames_ratio):
@@ -104,7 +104,7 @@ class MotionDetector():
 
                 # Contar píxeles de movimiento
                 non_zero_count = cv2.countNonZero(diff_thresh)
-                print(f"Frame {idx} con pixeles valiosos {non_zero_count}")
+                log.info(f"Frame {idx} con pixeles valiosos {non_zero_count}")
                 # Detectar si hay movimiento
                 if non_zero_count > min_motion_pixels:
                     motion_frames.append(frame)

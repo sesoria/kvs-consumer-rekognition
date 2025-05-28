@@ -6,7 +6,7 @@ import boto3
 import logging
 from amazon_websocket_apigateway import websocket_apigateway as websocket_ag
 from amazon_kinesis_video_consumer_library.motion_detector import MotionDetector
-from amazon_kinesis_video_consumer_library.kinesis_video_streams_parser import KvsConsumerLibrary
+from amazon_kinesis_video_consumer_library.kinesis_video_streams_parser import KvsParser
 from amazon_kinesis_video_consumer_library.kinesis_video_fragment_processor import KvsFragementProcessor
 
 # Config the logger.
@@ -29,7 +29,7 @@ class KvsPythonConsumerExample:
         the KVS clients or the various media API calls. These have individual authentication configuration and 
         a variety of other user defined settings so we keep them here in the users application logic for configurability.
 
-        The KvsConsumerLibrary sits above these and parses responses from GetMedia and GetMediaForFragmentList 
+        The KvsParser sits above these and parses responses from GetMedia and GetMediaForFragmentList 
         into MKV fragments and provides convenience functions to further process, save and extract individual frames.  
         '''
 
@@ -55,7 +55,7 @@ class KvsPythonConsumerExample:
     def service_loop(self):
         
         ####################################################
-        # Start an instance of the KvsConsumerLibrary reading in a Kinesis Video Stream
+        # Start an instance of the KvsParser reading in a Kinesis Video Stream
 
         # Get the KVS Endpoint for the GetMedia Call for this stream
         log.info(f'Getting KVS GetMedia Endpoint for stream: {KVS_STREAM01_NAME} ........')
@@ -74,27 +74,27 @@ class KvsPythonConsumerExample:
             }
         )
 
-        # Initialize an instance of the KvsConsumerLibrary, provide the GetMedia response and the required call-backs
-        log.info(f'Starting KvsConsumerLibrary for stream: {KVS_STREAM01_NAME}........')
-        my_stream01_consumer = KvsConsumerLibrary(KVS_STREAM01_NAME, 
+        # Initialize an instance of the KvsParser, provide the GetMedia response and the required call-backs
+        log.info(f'Starting KvsParser for stream: {KVS_STREAM01_NAME}........')
+        my_stream01_consumer = KvsParser(KVS_STREAM01_NAME, 
                                               get_media_response, 
                                               self.on_fragment_arrived, 
                                               self.on_stream_read_complete, 
                                               self.on_stream_read_exception
                                             )
 
-        # Start the instance of KvsConsumerLibrary, any matching fragments will begin arriving in the on_fragment_arrived callback
+        # Start the instance of KvsParser, any matching fragments will begin arriving in the on_fragment_arrived callback
         my_stream01_consumer.start()
 
-        # Can create another instance of KvsConsumerLibrary on a different media stream or continue on to other application logic. 
+        # Can create another instance of KvsParser on a different media stream or continue on to other application logic. 
 
-        # Here can hold the process up by waiting for the KvsConsumerLibrary thread to finish (may never finish for live streaming fragments)
+        # Here can hold the process up by waiting for the KvsParser thread to finish (may never finish for live streaming fragments)
         #my_stream01_consumer.join()
 
         # Or 
     
         # Run a loop with the applications main functionality that holds the process open.
-        # Can also use to monitor the completion of the KvsConsumerLibrary instance and trigger a required action on completion.
+        # Can also use to monitor the completion of the KvsParser instance and trigger a required action on completion.
         while True:
             log.info("Main application loop running...")
             time.sleep(5)
@@ -109,8 +109,8 @@ class KvsPythonConsumerExample:
 
     def on_fragment_arrived(self, stream_name, fragment_bytes, fragment_dom, fragment_receive_duration):
         '''
-        This is the callback for the KvsConsumerLibrary to send MKV fragments as they are received from a stream being processed.
-        The KvsConsumerLibrary returns the received fragment as raw bytes and a DOM like structure containing the fragments meta data.
+        This is the callback for the KvsParser to send MKV fragments as they are received from a stream being processed.
+        The KvsParser returns the received fragment as raw bytes and a DOM like structure containing the fragments meta data.
 
         With these parameters you can do a variety of post-processing using the KvsFragementProcessor including saving the fragment as a
         standalone MKV file to local disk, request individual frames as a numpy.ndarray for data science applications or as JPEG/PNG files to
@@ -122,8 +122,8 @@ class KvsPythonConsumerExample:
         ### Parameters:
 
             **stream_name**: str
-                Name of the stream as set when the KvsConsumerLibrary thread triggering this callback was initiated.
-                Use this to identify a fragment when multiple streams are read from different instances of KvsConsumerLibrary to this callback.
+                Name of the stream as set when the KvsParser thread triggering this callback was initiated.
+                Use this to identify a fragment when multiple streams are read from different instances of KvsParser to this callback.
 
             **fragment_bytes**: bytearray
                 A ByteArray with raw bytes from exactly one fragment. Can be save or processed to access individual frames
@@ -137,35 +137,17 @@ class KvsPythonConsumerExample:
         '''
         try:
             # Log the arrival of a fragment. 
-            # use stream_name to identify fragments where multiple instances of the KvsConsumerLibrary are running on different streams.
+            # use stream_name to identify fragments where multiple instances of the KvsParser are running on different streams.
             start_time = time.time() 
             log.info(f'\n\n##########################\nFragment Received on Stream: {stream_name}\nProcessing Duration: {fragment_receive_duration} Secs\n##########################')
             self.last_good_fragment_tags = self.kvs_fragment_processor.get_fragment_tags(fragment_dom)
 
-            # log.info(f'####### Fragment MKV Tags:')
-            # for key, value in self.last_good_fragment_tags.items():
-            #     log.info(f'{key} : {value}')
-
-            # Define the directory to save frames
-            save_dir_frames = 'frames/'
-            if not os.path.exists(save_dir_frames):
-                os.makedirs(save_dir_frames)
-            save_dir_labels = 'bounding_boxes/'
-            if not os.path.exists(save_dir_labels):
-                os.makedirs(save_dir_labels)
-            save_dir_detections = 'detections/'
-            if not os.path.exists(save_dir_detections):
-                os.makedirs(save_dir_detections)
-
             # Using the fragment number as a key/name for the frames
             fragment_number = self.last_good_fragment_tags['AWS_KINESISVIDEO_FRAGMENT_NUMBER']
-            jpg_file_base_path = os.path.join(save_dir_frames, fragment_number)
-            labels_file_base_path = os.path.join(save_dir_labels, fragment_number)
-            detections_file_base_path = os.path.join(save_dir_detections, fragment_number)
             
             producer_timestamp = self.last_good_fragment_tags['AWS_KINESISVIDEO_PRODUCER_TIMESTAMP']
             
-            motion_frames = self.process_fragment_frames(fragment_bytes, jpg_file_base_path, labels_file_base_path, detections_file_base_path, producer_timestamp, fragment_number)
+            motion_frames = self.process_fragment_frames(fragment_bytes, producer_timestamp, fragment_number)
             print(f"Resultado del procesamiento: {'Movimiento Detectado' if len(motion_frames) > 0 else '[]'}")
             processing_duration = time.time() - start_time
             print(f"Callback completado en {processing_duration:.4f} segundos.")
@@ -173,7 +155,7 @@ class KvsPythonConsumerExample:
         except Exception as err:
             log.error(f'on_fragment_arrived Error: {err}')
 
-    def process_fragment_frames(self, fragment_bytes, frames_path, labels_path, detections_path, producer_timestamp, fragment_number):
+    def process_fragment_frames(self, fragment_bytes, producer_timestamp, fragment_number):
         '''
         Processes the fragment frames for motion detection and object recognition.
 
@@ -206,7 +188,7 @@ class KvsPythonConsumerExample:
             motion_frames = self.motion_detector.frame_differencing(frames)
             if len(motion_frames) > 0 :
                 # Gets the AWS Rekognition response with the labels
-                labels_fragment = self.get_labels_from_frames(motion_frames, labels_path)
+                labels_fragment = self.get_labels_from_frames(motion_frames)
                 # Parse the Rekognition Response
                 # fragment_bounding_boxes, fragment_unique_bboxs = self.get_bounding_boxes(labels_fragment)
                 fragment_bounding_boxes = self.get_bounding_boxes(labels_fragment)
@@ -218,11 +200,6 @@ class KvsPythonConsumerExample:
                     "timestamp": producer_timestamp,
                     "labels": fragment_bounding_boxes
                 })
-
-                # Gets the frames with a mask of the bounding boxes added
-                detection_frames = self.kvs_fragment_processor.get_frames_with_bounding_boxes(motion_frames, fragment_bounding_boxes)
-                self.kvs_fragment_processor.save_frames_as_jpeg(motion_frames, frames_path)
-                self.kvs_fragment_processor.save_frames_as_jpeg(detection_frames, detections_path)
                 processing_duration = time.time() - start_time
                 print(f"Procesamiento de movimiento completado en {processing_duration:.4f} segundos.")
             
@@ -231,7 +208,7 @@ class KvsPythonConsumerExample:
         except Exception as e:
             print(f"Error en el procesamiento del fragmento: {e}")
             
-    def get_labels_from_frames(self, frames, save_path):
+    def get_labels_from_frames(self, frames):
         '''
         Extracts labels from frames using AWS Rekognition, saves the Rekognition response for each frame as a JSON file,
         and collects all the detected labels for further processing.
@@ -257,9 +234,6 @@ class KvsPythonConsumerExample:
                 MaxLabels=10,
                 MinConfidence=80
             )
-            # Save the Rekognition response as a JSON file for debugging or future reference.
-            with open(f"{save_path}_{idx}.json", "w") as f:
-                f.write(json.dumps(response))
             # Append detected labels to the result list.
             labels += response["Labels"]
         return labels
@@ -317,69 +291,10 @@ class KvsPythonConsumerExample:
         # return fragment_bounding_boxes, fragment_unique_bboxs
         return fragment_bounding_boxes
 
-    # def calculate_iou(self, box1, box2):
-    #     """
-    #     Calcula el IoU (Intersection over Union) entre dos bounding boxes.
-    #     Devuelve un valor entre 0 y 1 indicando el grado de solapamiento.
-    #     """
-    #     x1 = max(box1['Left'], box2['Left'])
-    #     y1 = max(box1['Top'], box2['Top'])
-    #     x2 = min(box1['Left'] + box1['Width'], box2['Left'] + box2['Width'])
-    #     y2 = min(box1['Top'] + box1['Height'], box2['Top'] + box2['Height'])
-
-    #     # Calcular ancho y alto de la intersección
-    #     width = max(0, x2 - x1)
-    #     height = max(0, y2 - y1)
-
-    #     # Área de intersección
-    #     intersection = width * height
-
-    #     # Área de cada bounding box
-    #     area1 = box1['Width'] * box1['Height']
-    #     area2 = box2['Width'] * box2['Height']
-
-    #     # Área de unión
-    #     union = area1 + area2 - intersection
-
-    #     # Evitar división por cero
-    #     return intersection / union if union > 0 else 0
-
-    # def filter_detections(self, detections, iou_threshold=0.5):
-    #     """
-    #     Filtra las detecciones para eliminar duplicados basándose en la superposición de Bounding Boxes.
-    #     Se queda con la última detección en la lista si hay solapamiento alto.
-    #     """
-    #     grouped = {}  # Agrupar por 'Name'
-
-    #     for obj in detections:
-    #         name = obj['Name']
-    #         if name not in grouped:
-    #             grouped[name] = []
-            
-    #         # Comprobamos si este objeto solapa con alguno de los ya almacenados
-    #         new_list = []
-    #         should_add = True  # Indica si debemos añadir este objeto
-            
-    #         for existing in grouped[name]:
-    #             iou = self.calculate_iou(obj['Bounding_box'], existing['Bounding_box'])
-                
-    #             if iou > iou_threshold:  # Si el solapamiento es alto
-    #                 should_add = True  # Queremos quedarnos con la última detección
-    #             else:
-    #                 new_list.append(existing)  # Mantenemos los anteriores si el IoU es bajo
-            
-    #         if should_add:
-    #             new_list.append(obj)  # Añadimos el nuevo objeto
-            
-    #         grouped[name] = new_list  # Actualizamos la lista para este 'Name'
-
-    #     # Convertimos el diccionario en lista
-    #     result = [obj for obj_list in grouped.values() for obj in obj_list]
-    #     return result
 
     def on_stream_read_complete(self, stream_name):
         '''
-        Callback triggered when the KvsConsumerLibrary finishes reading all available fragments 
+        Callback triggered when the KvsParser finishes reading all available fragments 
         from the specified stream. Can be used to clean up resources or restart the stream.
 
         ### Parameters:
@@ -392,7 +307,7 @@ class KvsPythonConsumerExample:
 
     def on_stream_read_exception(self, stream_name, error):
         '''
-        This callback is triggered by an exception in the KvsConsumerLibrary reading a stream. 
+        This callback is triggered by an exception in the KvsParser reading a stream. 
         
         For example, to process use the last good fragment number from self.last_good_fragment_tags to
         restart the stream from that point in time with the example stream selector provided below. 
@@ -402,15 +317,15 @@ class KvsPythonConsumerExample:
         ### Parameters:
 
             **stream_name**: str
-                Name of the stream as set when the KvsConsumerLibrary thread triggering this callback was initiated.
-                Use this to identify a fragment when multiple streams are read from different instances of KvsConsumerLibrary to this callback.
+                Name of the stream as set when the KvsParser thread triggering this callback was initiated.
+                Use this to identify a fragment when multiple streams are read from different instances of KvsParser to this callback.
 
             **error**: err / exception
                 The Exception obje tvthat was thrown to trigger this callback.
 
         '''
 
-        # Can choose to restart the KvsConsumerLibrary thread at the last received fragment with below example StartSelector
+        # Can choose to restart the KvsParser thread at the last received fragment with below example StartSelector
         #StartSelector={
         #    'StartSelectorType': 'FRAGMENT_NUMBER',
         #    'AfterFragmentNumber': self.last_good_fragment_tags['AWS_KINESISVIDEO_CONTINUATION_TOKEN'],

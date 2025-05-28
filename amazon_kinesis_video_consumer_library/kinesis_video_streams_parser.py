@@ -31,7 +31,7 @@ or GetMediaForFragmentList call,
 
 Credits:
 # EMBLite by MideTechnology is an external EBML parser found at https://github.com/MideTechnology/ebmlite
-# For convenance a slightly modified version of EMBLite is shipped with the KvsConsumerLibrary but adding credit where its due. 
+# For convenance a slightly modified version of EMBLite is shipped with the KvsParser but adding credit where its due. 
 # EMBLite MIT License: https://github.com/MideTechnology/ebmlite/blob/development/LICENSE
 
  '''
@@ -50,7 +50,7 @@ from amazon_kinesis_video_consumer_library.ebmlite import loadSchema
 log = logging.getLogger(__name__)
 
 
-class KvsConsumerLibrary(Thread):
+class KvsParser(Thread):
 
     def __init__(self, 
                 stream_name, 
@@ -68,7 +68,7 @@ class KvsConsumerLibrary(Thread):
         self._stop_get_media = False
 
         # Init the local vars. 
-        log.info('Initilizing KvsConsumerLibrary...')
+        log.info('Initilizing KvsParser...')
         self.stream_name = stream_name
         self.get_media_response_object = get_media_response_object
         self.on_fragment_arrived_callback = on_fragment_arrived

@@ -18,7 +18,7 @@ logging.basicConfig(format="[%(name)s.%(funcName)s():%(lineno)d] - [%(levelname)
 # Update the desired region and KVS stream name.
 KVS_STREAM01_NAME = 'camera_cinnado'  # Replace with your KVS stream name
 
-class KvsPythonConsumerExample:
+class KvsPythonConsumer:
     '''
     Example class to demonstrate usage the AWS Kinesis Video Streams KVS) Consumer Library for Python.
     '''
@@ -358,5 +358,5 @@ class KvsPythonConsumerExample:
         return response['DataEndpoint']
 
 if __name__ == "__main__":
-    kvsConsumerExample = KvsPythonConsumerExample()
+    kvsConsumerExample = KvsPythonConsumer()
     kvsConsumerExample.service_loop()

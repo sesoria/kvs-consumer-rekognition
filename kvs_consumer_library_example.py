@@ -16,7 +16,7 @@ logging.basicConfig(format="[%(name)s.%(funcName)s():%(lineno)d] - [%(levelname)
                     level=logging.INFO)
 
 # Update the desired region and KVS stream name.
-KVS_STREAM01_NAME = 'camera_cinnado'  # Replace with your KVS stream name
+STREAM_NAME = os.getenv("STREAM_NAME", "camera_cinnado")
 
 class KvsPythonConsumer:
     '''
@@ -58,25 +58,25 @@ class KvsPythonConsumer:
         # Start an instance of the KvsParser reading in a Kinesis Video Stream
 
         # Get the KVS Endpoint for the GetMedia Call for this stream
-        log.info(f'Getting KVS GetMedia Endpoint for stream: {KVS_STREAM01_NAME} ........')
-        get_media_endpoint = self._get_data_endpoint(KVS_STREAM01_NAME, 'GET_MEDIA')
+        log.info(f'Getting KVS GetMedia Endpoint for stream: {STREAM_NAME} ........')
+        get_media_endpoint = self._get_data_endpoint(STREAM_NAME, 'GET_MEDIA')
         
         # Get the KVS Media client for the GetMedia API call
-        log.info(f'Initializing KVS Media client for stream: {KVS_STREAM01_NAME}........')
+        log.info(f'Initializing KVS Media client for stream: {STREAM_NAME}........')
         kvs_media_client = self.session.client('kinesis-video-media', endpoint_url=get_media_endpoint)
 
         # Make a KVS GetMedia API call with the desired KVS stream and StartSelector type and time bounding.
-        log.info(f'Requesting KVS GetMedia Response for stream: {KVS_STREAM01_NAME}........')
+        log.info(f'Requesting KVS GetMedia Response for stream: {STREAM_NAME}........')
         get_media_response = kvs_media_client.get_media(
-            StreamName=KVS_STREAM01_NAME,
+            StreamName=STREAM_NAME,
             StartSelector={
                 'StartSelectorType': 'NOW'
             }
         )
 
         # Initialize an instance of the KvsParser, provide the GetMedia response and the required call-backs
-        log.info(f'Starting KvsParser for stream: {KVS_STREAM01_NAME}........')
-        my_stream01_consumer = KvsParser(KVS_STREAM01_NAME, 
+        log.info(f'Starting KvsParser for stream: {STREAM_NAME}........')
+        my_stream01_consumer = KvsParser(STREAM_NAME, 
                                               get_media_response, 
                                               self.on_fragment_arrived, 
                                               self.on_stream_read_complete, 
@@ -194,7 +194,7 @@ class KvsPythonConsumer:
                 fragment_bounding_boxes = self.get_bounding_boxes(labels_fragment)
                 
                 # Enviar bounding boxes al frontend mediante AWS
-                active_connections = websocket_ag.get_connection_ids_by_stream(KVS_STREAM01_NAME)
+                active_connections = websocket_ag.get_connection_ids_by_stream(STREAM_NAME)
                 websocket_ag.send_message_to_clients(self.apigw_client, active_connections, {
                     "fragment_number": fragment_number,
                     "timestamp": producer_timestamp,

@@ -41,7 +41,7 @@ python3 -m pip install -r requirements.txt
 
 5. In kvs_consumer_library_example.py, update the KVS stream parameters:  
     a. REGION and  
-    b. KVS_STREAM01_NAME  
+    b. STREAM_NAME  
 
 6. Run the example code:
 ```

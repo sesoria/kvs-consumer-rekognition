@@ -4,6 +4,7 @@ import json
 import time
 import boto3
 import logging
+from collections import defaultdict
 from amazon_websocket_apigateway import websocket_apigateway as websocket_ag
 from amazon_kinesis_video_consumer_library.motion_detector import MotionDetector
 from amazon_kinesis_video_consumer_library.kinesis_video_streams_parser import KvsParser
@@ -253,7 +254,8 @@ class KvsPythonConsumer:
                 A list of bounding boxes for each frame. Each bounding box contains the label name, 
                 bounding box coordinates, and confidence score.
         '''
-        fragment_bounding_boxes = []
+        fragment_bounding_boxes_1 = []
+        fragment_bounding_boxes_2 = []
         valid_fragment_labels = []
         
         # Filter out parent labels that have children with instances.
@@ -280,17 +282,67 @@ class KvsPythonConsumer:
                         "Confidence": instance["Confidence"],
                     }
                 )
-        fragment_bounding_boxes.append(frame_bounding_boxes)
+        fragment_bounding_boxes_1.append(frame_bounding_boxes)
+        print(fragment_bounding_boxes_1)
+        fragment_bounding_boxes_2 = self.deduplicate_detections(fragment_bounding_boxes_1)
+        return fragment_bounding_boxes_2
 
-        # filter_duration = time.time()
-        # fragment_unique_bboxs = self.filter_detections(fragment_bounding_boxes[0])
-        # print(f"filter FUNCION en {time.time() - filter_duration:.4f} segundos.")
-        
-        # print(f"fragment_unique_bboxs:{fragment_unique_bboxs}\n\n")
-        print(f"fragment_bounding_boxes:{fragment_bounding_boxes}\n\n")
-        # return fragment_bounding_boxes, fragment_unique_bboxs
-        return fragment_bounding_boxes
+    def compute_iou(self, box1, box2):
+        x1_min = box1['Left']
+        y1_min = box1['Top']
+        x1_max = x1_min + box1['Width']
+        y1_max = y1_min + box1['Height']
 
+        x2_min = box2['Left']
+        y2_min = box2['Top']
+        x2_max = x2_min + box2['Width']
+        y2_max = y2_min + box2['Height']
+
+        inter_x_min = max(x1_min, x2_min)
+        inter_y_min = max(y1_min, y2_min)
+        inter_x_max = min(x1_max, x2_max)
+        inter_y_max = min(y1_max, y2_max)
+
+        inter_area = max(0, inter_x_max - inter_x_min) * max(0, inter_y_max - inter_y_min)
+        box1_area = box1['Width'] * box1['Height']
+        box2_area = box2['Width'] * box2['Height']
+        union_area = box1_area + box2_area - inter_area
+
+        if union_area == 0:
+            return 0.0
+
+        return inter_area / union_area
+
+    # --- Deduplicar detecciones solapadas por tipo ---
+    def deduplicate_detections(self, detections_nested, iou_threshold=0.5):
+        result = []
+        by_name = defaultdict(list)
+
+        # Aplanar la lista de listas
+        all_detections = [item for sublist in detections_nested for item in sublist]
+
+        # Agrupar por 'Name'
+        for det in all_detections:
+            by_name[det['Name']].append(det)
+
+        # Procesar cada grupo
+        for name, group in by_name.items():
+            kept = []
+            sorted_group = sorted(group, key=lambda x: -x['Confidence'])
+
+            for det in sorted_group:
+                overlap = False
+                for kept_det in kept:
+                    iou = self.compute_iou(det['Bounding_box'], kept_det['Bounding_box'])
+                    if iou >= iou_threshold:
+                        overlap = True
+                        break
+                if not overlap:
+                    kept.append(det)
+
+            result.extend(kept)
+
+        return result
 
     def on_stream_read_complete(self, stream_name):
         '''

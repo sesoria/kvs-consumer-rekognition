@@ -69,7 +69,7 @@ class MotionDetector():
         
         return jpeg_paths
 
-    def frame_differencing(self, frames, threshold=90, min_motion_pixels=700):
+    def frame_differencing(self, frames, threshold=90, min_motion_pixels=1500):
         """
         Analiza una lista de frames para detectar movimiento.
 

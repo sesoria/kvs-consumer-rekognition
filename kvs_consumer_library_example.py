@@ -17,7 +17,7 @@ logging.basicConfig(format="[%(name)s.%(funcName)s():%(lineno)d] - [%(levelname)
                     level=logging.INFO)
 
 # Update the desired region and KVS stream name.
-STREAM_NAME = os.getenv("STREAM_NAME", "camera_cinnado")
+STREAM_NAME = os.getenv("STREAM_NAME", "Rancho_1")
 
 class KvsPythonConsumer:
     '''

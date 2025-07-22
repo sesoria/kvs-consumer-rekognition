@@ -3,6 +3,8 @@ import sys
 import json
 import time
 import boto3
+import cv2
+import io
 import logging
 from collections import defaultdict
 from amazon_websocket_apigateway import websocket_apigateway as websocket_ag
@@ -49,6 +51,9 @@ class KvsPythonConsumer:
         self.kvs_client = self.session.client("kinesisvideo")
         self.rekognition_client = self.session.client("rekognition")
         self.motion_detector = MotionDetector()
+
+        # Thumbnail
+        self.thumbnail_taked = False
 
 
     ####################################################
@@ -185,6 +190,13 @@ class KvsPythonConsumer:
             start_time = time.time()
             # Obtains the frames of the fragment in a numpy array type
             frames = self.kvs_fragment_processor.get_frames_as_ndarray(fragment_bytes, one_in_frames_ratio=5)
+
+            if not self.thumbnail_taked:
+                print("Taking thumbnail")
+                first_frame = frames[0]
+                self.take_thumbnail(first_frame)
+                self.thumbnail_taked = True
+
             # Detects which frames of the fragment have motion
             motion_frames = self.motion_detector.frame_differencing(frames)
             if len(motion_frames) > 0 :
@@ -312,6 +324,16 @@ class KvsPythonConsumer:
             return 0.0
 
         return inter_area / union_area
+
+    def take_thumbnail(self, frame):
+        first_frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        success, encoded_image = cv2.imencode('.jpg', first_frame_bgr)
+        if not success:
+            raise ValueError("No se pudo codificar el frame como JPEG")
+
+        image_bytes = io.BytesIO(encoded_image.tobytes())
+        s3 = self.session.client("s3")
+        s3.upload_fileobj(image_bytes, "c-iris", f"thumbnails/{STREAM_NAME}/thumbnail.jpg")
 
     # --- Deduplicar detecciones solapadas por tipo ---
     def deduplicate_detections(self, detections_nested, iou_threshold=0.5):
